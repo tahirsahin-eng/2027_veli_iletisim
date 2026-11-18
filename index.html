@@ -258,9 +258,95 @@
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .btn-save { background: var(--primary); color: #fff; border: none; padding: 8px 16px; border-radius: 7px; font-weight: 600; cursor: pointer; }
   .btn-cancel { background: #e2e8f0; color: #334155; border: none; padding: 8px 14px; border-radius: 7px; font-weight: 600; cursor: pointer; }
+
+  /* PIN Lock Screen */
+  .lock-screen {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .lock-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 380px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.35);
+  }
+  .lock-icon {
+    font-size: 2.4rem;
+    margin-bottom: 10px;
+  }
+  .lock-card h2 {
+    font-size: 1.15rem;
+    color: var(--primary);
+    margin-bottom: 6px;
+  }
+  .lock-card p {
+    font-size: 0.83rem;
+    color: var(--muted);
+    margin-bottom: 16px;
+    line-height: 1.4;
+  }
+  .lock-input {
+    width: 100%;
+    padding: 12px;
+    font-size: 1.2rem;
+    text-align: center;
+    letter-spacing: 4px;
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    outline: none;
+  }
+  .lock-input:focus {
+    border-color: var(--primary-light);
+  }
+  .lock-btn {
+    width: 100%;
+    padding: 11px;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .lock-btn:hover {
+    background: var(--primary-light);
+  }
+  .lock-err {
+    color: #dc2626;
+    font-size: 0.8rem;
+    margin-top: 8px;
+    min-height: 18px;
+    font-weight: 600;
+  }
+
 </style>
 </head>
 <body>
+
+<!-- PIN Lock Screen -->
+<div class="lock-screen" id="lockScreen">
+  <div class="lock-card">
+    <div class="lock-icon">🔒</div>
+    <h2>Saffet Çam Ortaokulu</h2>
+    <p>Öğrenci ve Veli İletişim Sistemine erişmek için okul personel giriş şifresini giriniz.</p>
+    <input type="password" id="pinEntryInput" class="lock-input" placeholder="••••" onkeydown="if(event.key==='Enter') checkPin()">
+    <button class="lock-btn" onclick="checkPin()">Giriş Yap</button>
+    <div class="lock-err" id="pinError"></div>
+  </div>
+</div>
+
 
 <header>
   <div class="header-inner">
@@ -270,7 +356,8 @@
     </div>
     <div class="header-actions">
       <span class="sync-badge offline" id="syncStatus">● Yerel Mod (Bulut Bağlı Değil)</span>
-      <button class="btn-top" onclick="openCloudModal()">☁️ Firebase Bulut Ayarı</button>
+      <button class="btn-top" onclick="openCloudModal()">☁️ Bulut / Şifre Ayarı</button>
+      <button class="btn-top" onclick="lockNow()" title="Ekranı Kilitle">🔒 Kilitle</button>
       <button class="btn-top" onclick="exportBackup()">💾 Yedek İndir</button>
       <button class="btn-top" onclick="document.getElementById('importFile').click()">📂 Yedek Yükle</button>
       <input type="file" id="importFile" accept=".json" style="display:none" onchange="importBackup(event)">
@@ -390,7 +477,15 @@ const STORAGE_KEY = 'saffet_cam_rehber_v2';
 const CLOUD_CFG_KEY = 'saffet_cam_firebase_cfg_v1';
 
 // İsterseniz kendi Firebase projenizin bilgilerini doğrudan buraya da yazabilirsiniz:
-const EMBEDDED_FIREBASE_CONFIG = null;
+const EMBEDDED_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyANKa7fyIv1_EKRivoBf0vcUx5VtPotrn0",
+  authDomain: "saffet-cam-rehber.firebaseapp.com",
+  projectId: "saffet-cam-rehber",
+  storageBucket: "saffet-cam-rehber.firebasestorage.app",
+  messagingSenderId: "843631725657",
+  appId: "1:843631725657:web:3d2725b4744b5b20263548",
+  measurementId: "G-D9L4WDVJ3J"
+};
 
 let customData = {};
 try {
@@ -667,6 +762,7 @@ function openCloudModal() {
   if (savedCfg) {
     document.getElementById('firebaseConfigInput').value = savedCfg;
   }
+  document.getElementById('schoolPinInput').value = getActivePin();
   document.getElementById('cloudModal').style.display = 'flex';
 }
 
@@ -675,10 +771,14 @@ function closeModal(id) {
 }
 
 function saveCloudConfig() {
+  const newPin = document.getElementById('schoolPinInput').value.trim();
+  if (newPin) {
+    localStorage.setItem(PIN_CFG_KEY, newPin);
+  }
   const raw = document.getElementById('firebaseConfigInput').value.trim();
   if (!raw) {
     localStorage.removeItem(CLOUD_CFG_KEY);
-    alert('Bulut yapılandırması temizlendi.');
+    alert('Giriş şifresi güncellendi (Bulut yapılandırması boş bırakıldı).');
     closeModal('cloudModal');
     return;
   }
@@ -767,6 +867,41 @@ if (EMBEDDED_FIREBASE_CONFIG) {
   initFirebase(EMBEDDED_FIREBASE_CONFIG);
 } else if (savedCloud) {
   try { initFirebase(JSON.parse(savedCloud)); } catch(e) {}
+}
+
+
+// --- PIN Lock Security ---
+const DEFAULT_SCHOOL_PIN = '7700';
+const PIN_CFG_KEY = 'saffet_cam_school_pin_v1';
+const PIN_SESSION_KEY = 'saffet_cam_unlocked_session';
+
+function getActivePin() {
+  return localStorage.getItem(PIN_CFG_KEY) || DEFAULT_SCHOOL_PIN;
+}
+
+function checkPin() {
+  const val = document.getElementById('pinEntryInput').value.trim();
+  const errEl = document.getElementById('pinError');
+  if (val === getActivePin()) {
+    sessionStorage.setItem(PIN_SESSION_KEY, '1');
+    document.getElementById('lockScreen').style.display = 'none';
+    errEl.textContent = '';
+  } else {
+    errEl.textContent = 'Hatalı şifre! Lütfen tekrar deneyin.';
+    document.getElementById('pinEntryInput').value = '';
+    document.getElementById('pinEntryInput').focus();
+  }
+}
+
+function lockNow() {
+  sessionStorage.removeItem(PIN_SESSION_KEY);
+  document.getElementById('pinEntryInput').value = '';
+  document.getElementById('pinError').textContent = '';
+  document.getElementById('lockScreen').style.display = 'flex';
+}
+
+if (sessionStorage.getItem(PIN_SESSION_KEY) === '1') {
+  document.getElementById('lockScreen').style.display = 'none';
 }
 
 render();
