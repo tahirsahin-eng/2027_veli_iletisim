@@ -331,6 +331,47 @@
     font-weight: 600;
   }
 
+
+  .btn-top.primary-add {
+    background: #16a34a;
+    border-color: #22c55e;
+    font-weight: 600;
+  }
+  .btn-top.primary-add:hover {
+    background: #15803d;
+  }
+  .btn-del {
+    background: transparent;
+    border: 1px solid #fecaca;
+    color: #dc2626;
+    font-size: 0.74rem;
+    padding: 4px 9px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn-del:hover {
+    background: #fef2f2;
+  }
+  .btn-restore {
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    color: #92400e;
+    font-size: 0.74rem;
+    padding: 4px 9px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .card.deleted-card {
+    opacity: 0.72;
+    border-style: dashed;
+    border-color: #f87171;
+    background: #fffafa;
+  }
+  .modal .m-group select {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: 0.88rem; background: #fff;
+  }
+
 </style>
 </head>
 <body>
@@ -356,6 +397,7 @@
     </div>
     <div class="header-actions">
       <span class="sync-badge offline" id="syncStatus">● Yerel Mod (Bulut Bağlı Değil)</span>
+      <button class="btn-top primary-add" onclick="openAddStudentModal()">➕ Yeni Öğrenci Ekle</button>
       <button class="btn-top" onclick="openCloudModal()">☁️ Bulut / Şifre Ayarı</button>
       <button class="btn-top" onclick="lockNow()" title="Ekranı Kilitle">🔒 Kilitle</button>
       <button class="btn-top" onclick="exportBackup()">💾 Yedek İndir</button>
@@ -390,6 +432,7 @@
         <option value="all">Tümü</option>
         <option value="has">Telefonu Kayıtlı Olanlar</option>
         <option value="missing">Telefonu Eksik Olanlar</option>
+        <option value="deleted">Nakil / Silinen Öğrenciler</option>
       </select>
     </div>
     <button class="btn-reset" onclick="resetFilters()">Temizle</button>
@@ -433,6 +476,59 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal('editModal')">İptal</button>
       <button class="btn-save" onclick="saveStudentEdit()">Kaydet ve Senkronize Et</button>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase Cloud Config Modal -->
+
+<!-- Add New Student Modal -->
+<div class="modal-backdrop" id="addStudentModal">
+  <div class="modal">
+    <h3>➕ Sınıfa Yeni Öğrenci Ekle</h3>
+    <p class="desc">Yeni gelen veya kayıt altına alınan öğrenciyi seçtiğiniz şubeye ekleyin. Kayıt buluta (Firestore) senkronize edilir.</p>
+    <div class="m-group">
+      <label>Sınıf / Şube *</label>
+      <select id="addSinif"></select>
+    </div>
+    <div class="m-group">
+      <label>Okul Numarası *</label>
+      <input type="text" id="addNo" placeholder="Örn: 980">
+    </div>
+    <div class="m-group">
+      <label>Öğrenci Adı Soyadı *</label>
+      <input type="text" id="addAdSoyad" placeholder="Örn: AHMET YILMAZ">
+    </div>
+    <div class="m-group">
+      <label>Cinsiyeti</label>
+      <select id="addCinsiyet">
+        <option value="Erkek">Erkek</option>
+        <option value="Kız">Kız</option>
+      </select>
+    </div>
+    <div class="m-group">
+      <label>Veli Adı Soyadı</label>
+      <input type="text" id="addVeli" placeholder="Örn: Ayşe Yılmaz (Annesi)">
+    </div>
+    <div class="m-group">
+      <label>Anne Telefonu (05XX...)</label>
+      <input type="text" id="addAnne" placeholder="05XX XXX XX XX">
+    </div>
+    <div class="m-group">
+      <label>Baba Telefonu (05XX...)</label>
+      <input type="text" id="addBaba" placeholder="05XX XXX XX XX">
+    </div>
+    <div class="m-group">
+      <label>Vasi / Yakın Telefonu</label>
+      <input type="text" id="addVasi" placeholder="05XX XXX XX XX">
+    </div>
+    <div class="m-group">
+      <label>Öğrenci Fotoğrafı (İsteğe Bağlı)</label>
+      <input type="file" id="addPhotoFile" accept="image/*">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('addStudentModal')">İptal</button>
+      <button class="btn-save" onclick="saveNewStudent()">Öğrenciyi Ekle</button>
     </div>
   </div>
 </div>
@@ -508,7 +604,12 @@ function initFirebase(cfg) {
       snapshot.docChanges().forEach((change) => {
         const docId = change.doc.id;
         if (change.type === 'added' || change.type === 'modified') {
-          customData[docId] = change.doc.data();
+          const data = change.doc.data();
+          if (docId === '_extra_students' && Array.isArray(data.list)) {
+            customData._extra_students = data.list;
+          } else {
+            customData[docId] = data;
+          }
         } else if (change.type === 'removed') {
           delete customData[docId];
         }
@@ -554,16 +655,29 @@ async function persistRecord(no, recordObj) {
 }
 
 function getMergedStudents() {
-  return INITIAL_STUDENTS.map(st => {
+  const extras = Array.isArray(customData._extra_students) ? customData._extra_students : [];
+  const baseMap = new Map();
+  INITIAL_STUDENTS.forEach(st => baseMap.set(String(st.no), { ...st, silindi: false }));
+  extras.forEach(ex => {
+    if (ex && ex.no) {
+      baseMap.set(String(ex.no), { ...ex, silindi: false });
+    }
+  });
+
+  return Array.from(baseMap.values()).map(st => {
     const ov = customData[st.no];
-    if (!ov) return st;
+    if (!ov || typeof ov !== 'object') return st;
     return {
       ...st,
+      sinif: ov.sinif !== undefined ? ov.sinif : st.sinif,
+      adSoyad: ov.adSoyad !== undefined ? ov.adSoyad : st.adSoyad,
+      cinsiyet: ov.cinsiyet !== undefined ? ov.cinsiyet : st.cinsiyet,
       veli: ov.veli !== undefined ? ov.veli : st.veli,
       anneTel: ov.anneTel !== undefined ? ov.anneTel : st.anneTel,
       babaTel: ov.babaTel !== undefined ? ov.babaTel : st.babaTel,
       vasiTel: ov.vasiTel !== undefined ? ov.vasiTel : st.vasiTel,
-      foto: ov.foto !== undefined ? ov.foto : st.foto
+      foto: ov.foto !== undefined ? ov.foto : st.foto,
+      silindi: Boolean(ov.silindi)
     };
   });
 }
@@ -621,6 +735,11 @@ function render() {
   }
 
   const filtered = students.filter(s => {
+    if (phoneFilter === 'deleted') {
+      if (!s.silindi) return false;
+    } else {
+      if (s.silindi) return false;
+    }
     if (selectedClass && s.sinif !== selectedClass) return false;
     const hasPhone = (s.anneTel.length + s.babaTel.length + s.vasiTel.length) > 0;
     if (phoneFilter === 'has' && !hasPhone) return false;
@@ -634,7 +753,8 @@ function render() {
     return true;
   });
 
-  document.getElementById('statsPill').innerHTML = `Gösterilen: <b>${filtered.length}</b> / Toplam <b>${students.length}</b> öğrenci`;
+  const activeTotal = students.filter(x => !x.silindi).length;
+  document.getElementById('statsPill').innerHTML = `Gösterilen: <b>${filtered.length}</b> / Aktif: <b>${activeTotal}</b> öğrenci`;
 
   const grid = document.getElementById('studentGrid');
   if (filtered.length === 0) {
@@ -670,7 +790,7 @@ function render() {
     }
 
     return `
-      <div class="card">
+      <div class="card ${s.silindi ? 'deleted-card' : ''}">
         <div class="card-top">
           <div class="photo-box" onclick="triggerQuickPhoto('${s.no}')" title="Fotoğraf eklemek veya değiştirmek için tıklayın">
             ${photoHtml}
@@ -691,6 +811,10 @@ function render() {
         </div>
         <div class="card-footer">
           <button class="btn-edit" onclick="openEditModal('${s.no}')">✏️ Tel / Fotoğraf Düzenle</button>
+          ${s.silindi
+            ? `<button class="btn-restore" onclick="restoreStudent('${s.no}')">↩️ Geri Al</button>`
+            : `<button class="btn-del" onclick="deleteStudent('${s.no}', '${s.adSoyad.replace(/'/g, "\'")}')">🗑️ Nakil / Sil</button>`
+          }
         </div>
       </div>
     `;
@@ -902,6 +1026,97 @@ function lockNow() {
 
 if (sessionStorage.getItem(PIN_SESSION_KEY) === '1') {
   document.getElementById('lockScreen').style.display = 'none';
+}
+
+
+async function deleteStudent(no, name) {
+  if (!confirm(`${name} (No: ${no}) isimli öğrenciyi nakil/silinenler listesine taşımak istiyor musunuz?`)) return;
+  const existing = customData[no] || {};
+  await persistRecord(no, { ...existing, silindi: true, deletedAt: Date.now() });
+}
+
+async function restoreStudent(no) {
+  const existing = customData[no] || {};
+  await persistRecord(no, { ...existing, silindi: false, restoredAt: Date.now() });
+}
+
+function openAddStudentModal() {
+  const addSinifSel = document.getElementById('addSinif');
+  addSinifSel.innerHTML = '';
+  const allClasses = [...new Set(getMergedStudents().map(s => s.sinif))];
+  const currentSel = document.getElementById('selectClass').value;
+  allClasses.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    if (currentSel && currentSel === c) opt.selected = true;
+    addSinifSel.appendChild(opt);
+  });
+  document.getElementById('addNo').value = '';
+  document.getElementById('addAdSoyad').value = '';
+  document.getElementById('addCinsiyet').value = 'Erkek';
+  document.getElementById('addVeli').value = '';
+  document.getElementById('addAnne').value = '';
+  document.getElementById('addBaba').value = '';
+  document.getElementById('addVasi').value = '';
+  document.getElementById('addPhotoFile').value = '';
+  document.getElementById('addStudentModal').style.display = 'flex';
+}
+
+async function saveNewStudent() {
+  const sinif = document.getElementById('addSinif').value.trim();
+  const no = document.getElementById('addNo').value.trim();
+  const adSoyad = document.getElementById('addAdSoyad').value.trim().toUpperCase();
+  if (!sinif || !no || !adSoyad) {
+    alert('Lütfen Sınıf/Şube, Okul Numarası ve Öğrenci Adı Soyadı alanlarını doldurun.');
+    return;
+  }
+
+  const existingStudents = getMergedStudents();
+  const dup = existingStudents.find(s => String(s.no) === String(no) && !s.silindi);
+  if (dup) {
+    alert(`${no} okul numarası zaten ${dup.adSoyad} (${dup.sinif}) adına kayıtlı.`);
+    return;
+  }
+
+  const sampleTeacher = existingStudents.find(s => s.sinif === sinif && s.ogretmen);
+  let fotoDataUrl = '';
+  const fileInput = document.getElementById('addPhotoFile');
+  if (fileInput.files && fileInput.files[0]) {
+    fotoDataUrl = await resizeImageToDataUrl(fileInput.files[0]);
+  }
+
+  const newSt = {
+    no: String(no),
+    sNo: existingStudents.filter(s => s.sinif === sinif).length + 1,
+    adSoyad: adSoyad,
+    sinif: sinif,
+    cinsiyet: document.getElementById('addCinsiyet').value,
+    ogretmen: sampleTeacher ? sampleTeacher.ogretmen : '',
+    veli: document.getElementById('addVeli').value.trim(),
+    anneTel: parsePhoneInput(document.getElementById('addAnne').value),
+    babaTel: parsePhoneInput(document.getElementById('addBaba').value),
+    vasiTel: parsePhoneInput(document.getElementById('addVasi').value),
+    foto: fotoDataUrl
+  };
+
+  const extras = Array.isArray(customData._extra_students) ? customData._extra_students : [];
+  const filteredExtras = extras.filter(x => String(x.no) !== String(no));
+  filteredExtras.push(newSt);
+  customData._extra_students = filteredExtras;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(customData));
+
+  if (db) {
+    try {
+      await db.collection('ogrenci_guncellemeleri').doc('_extra_students').set({ list: filteredExtras }, { merge: true });
+      await db.collection('ogrenci_guncellemeleri').doc(String(no)).set({ ...newSt, silindi: false, updatedAt: Date.now() }, { merge: true });
+    } catch (err) {
+      alert('Buluta kaydedilirken hata oluştu (Yerel olarak eklendi): ' + err.message);
+    }
+  }
+
+  closeModal('addStudentModal');
+  render();
 }
 
 render();
